@@ -2,43 +2,43 @@ name: Infrastructure Security & Governance Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main" ]
 
 jobs:
-  security-and-compliance-scan:
+  security-analysis:
     name: Run Checkov & OPA Policy Evaluation
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository Code
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Setup HashiCorp Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
 
-      - name: Checkov Static Analysis
-        uses: bridgecrewio/checkov-action@master
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          framework: terraform
-          output_format: cli
-          soft_fail: true
+          python-version: '3.10'
 
-      - name: Initialize Terraform and Generate JSON Plan
-        run: |
-          cd terraform
-          terraform init -backend=false
-          terraform plan -out=tfplan.binary
-          terraform show -json tfplan.binary > tfplan.json
+      - name: Install Checkov
+        run: pip install checkov
 
-      - name: Install Conftest (Open Policy Agent Engine)
+      - name: Setup Conftest (OPA)
         run: |
-          wget https://github.com/open-policy-agent/conftest/releases/download/v0.42.0/conftest_0.42.0_Linux_x86_64.tar.gz
-          tar xzf conftest_0.42.0_Linux_x86_64.tar.gz
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/open-policy-agent/conftest/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          wget https://github.com/open-policy-agent/conftest/releases/download/v${LATEST_VERSION}/conftest_${LATEST_VERSION}_Linux_x86_64.tar.gz
+          tar xzf conftest_${LATEST_VERSION}_Linux_x86_64.tar.gz
           sudo mv conftest /usr/local/bin/
 
+      - name: Run Checkov Static Analysis
+        run: |
+          checkov -d ./terraform --framework terraform || true
+
       - name: Evaluate Custom OPA/Rego Governance Policies
-        run: conftest test terraform/tfplan.json --policy policy/
+        run: |
+          conftest test terraform/ --policy policy/
