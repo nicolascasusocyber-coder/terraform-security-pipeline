@@ -1,0 +1,84 @@
+name: AWS demo deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy or remove the demo
+        required: true
+        type: choice
+        options: [apply, destroy]
+      confirmation:
+        description: Type APPROVE-AWS to confirm this AWS operation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aws-demo
+  cancel-in-progress: false
+
+jobs:
+  security:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'APPROVE-AWS'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+          terraform_wrapper: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bash scripts/install-checks.sh
+      - run: bash scripts/test-security.sh
+
+  deploy:
+    needs: security
+    runs-on: ubuntu-latest
+    environment: aws-demo
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_VAR_bucket_name: ${{ vars.DEMO_BUCKET }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_offline_plan: 'false'
+      STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+      OPERATION: ${{ inputs.operation }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+          terraform_wrapper: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bash scripts/install-checks.sh
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          role-duration-seconds: 900
+      - name: Plan, evaluate, and apply
+        shell: bash
+        run: |
+          : "${STATE_BUCKET:?Set STATE_BUCKET in aws-demo}"
+          : "${TF_VAR_bucket_name:?Set DEMO_BUCKET in aws-demo}"
+          printf 'terraform {\n  backend "s3" {}\n}\n' > terraform/backend.tf
+          terraform -chdir=terraform init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="region=$TF_VAR_aws_region" \
+            -backend-config="key=terraform-security-pipeline/demo.tfstate" \
+            -backend-config="encrypt=true" -backend-config="use_lockfile=true"
+          flags=()
+          if [[ "$OPERATION" == destroy ]]; then flags=(-destroy); fi
+          plan="$RUNNER_TEMP/aws-demo.tfplan"
+          terraform -chdir=terraform plan -input=false -no-color "${flags[@]}" -out="$plan"
+          if [[ "$OPERATION" == apply ]]; then bash scripts/plan-check.sh terraform "$plan"; fi
+          terraform -chdir=terraform apply -input=false -no-color "$plan"

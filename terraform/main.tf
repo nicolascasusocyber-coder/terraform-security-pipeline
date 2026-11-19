@@ -1,28 +1,38 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.12.2, < 2.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "5.100.0"
     }
   }
 }
 
 provider "aws" {
   region                      = var.aws_region
-  skip_credentials_validation = true
-  skip_requesting_account_id  = true
-  skip_metadata_api_check     = true
+  skip_credentials_validation = var.offline_plan
+  skip_requesting_account_id  = var.offline_plan
+  skip_metadata_api_check     = var.offline_plan
 }
 
-# Remediation 1: S3 Bucket with Server-Side Encryption
-resource "aws_s3_bucket" "insecure_bucket" {
-  bucket        = "my-company-confidential-data-bucket"
-  force_destroy = true
+resource "aws_vpc" "demo" {
+  cidr_block = "10.42.0.0/16"
+
+  tags = {
+    Project = "terraform-security-pipeline"
+  }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "s3_encryption" {
-  bucket = aws_s3_bucket.insecure_bucket.id
+resource "aws_s3_bucket" "demo" {
+  bucket = var.bucket_name
+
+  tags = {
+    Project = "terraform-security-pipeline"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "demo" {
+  bucket = aws_s3_bucket.demo.bucket
 
   rule {
     apply_server_side_encryption_by_default {
@@ -31,27 +41,28 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "s3_encryption" {
   }
 }
 
-# Remediation 2: EBS Storage Volume with Encryption
-resource "aws_ebs_volume" "insecure_volume" {
-  availability_zone = "eu-west-1a"
-  size              = 20
-  encrypted         = true
-
-  tags = {
-    Name = "SecureDataVolume"
-  }
+resource "aws_s3_bucket_public_access_block" "demo" {
+  bucket                  = aws_s3_bucket.demo.bucket
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
-# Remediation 3: Restricted Security Group (No 0.0.0.0/0 SSH)
-resource "aws_security_group" "insecure_sg" {
-  name        = "secure-ssh-sg"
-  description = "Security group with restricted SSH port"
-  vpc_id      = "vpc-12345678"
+resource "aws_security_group" "demo" {
+  name        = "terraform-security-pipeline-demo"
+  description = "Demo security group with SSH restricted to the VPC"
+  vpc_id      = aws_vpc.demo.id
 
   ingress {
+    description = "SSH within the demo VPC"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
+    cidr_blocks = [aws_vpc.demo.cidr_block]
+  }
+
+  tags = {
+    Project = "terraform-security-pipeline"
   }
 }
