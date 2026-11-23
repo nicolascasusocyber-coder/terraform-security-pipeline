@@ -39,14 +39,17 @@ ssh_protocol(rule) if {
     rule.to_port >= 22
 }
 
-public_sources(rule) contains cidr if {
-    some field in {"cidr_blocks", "ipv6_cidr_blocks"}
-    some cidr in object.get(rule, field, [])
-    cidr in {"0.0.0.0/0", "::/0"}
-}
-
-public_sources(rule) contains cidr if {
-    some field in {"cidr_ipv4", "cidr_ipv6"}
-    cidr := object.get(rule, field, "")
-    cidr in {"0.0.0.0/0", "::/0"}
+public_sources(rule) := sources if {
+    public_cidrs := {"0.0.0.0/0", "::/0"}
+    inline_sources := {cidr |
+        some field in {"cidr_blocks", "ipv6_cidr_blocks"}
+        some cidr in object.get(rule, field, [])
+        cidr in public_cidrs
+    }
+    standalone_sources := {cidr |
+        some field in {"cidr_ipv4", "cidr_ipv6"}
+        cidr := object.get(rule, field, "")
+        cidr in public_cidrs
+    }
+    sources := inline_sources | standalone_sources
 }
