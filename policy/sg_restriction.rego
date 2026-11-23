@@ -9,7 +9,7 @@ planned_resource contains resource if {
 }
 
 deny contains "PLAN_FORMAT expected Terraform plan JSON with resource_changes" if {
-    not is_array(input.resource_changes)
+    not is_array(object.get(input, "resource_changes", null))
 }
 
 deny contains msg if {

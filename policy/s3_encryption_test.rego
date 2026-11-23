@@ -17,5 +17,6 @@ test_encryption_must_match_bucket if {
 }
 
 test_reject_non_plan_input if {
-    "PLAN_FORMAT expected Terraform plan JSON with resource_changes" in deny with input as {}
+    findings := deny with input as {}
+    "PLAN_FORMAT expected Terraform plan JSON with resource_changes" in findings
 }
